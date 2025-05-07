@@ -53,6 +53,7 @@ class CommandLineParser(object):
                        default=self.DEFAULT_OUTPUT_FILE, 
                        help="output file(default: %s)" % self.DEFAULT_OUTPUT_FILE)
         p.add_argument("-f", "--file", help="source extended bt script to compile")
+        p.add_argument("defines", nargs='*', help="pre-define const value")
         self.parser = p
 
     def run(self):
@@ -147,11 +148,22 @@ class App(object):
             s = s.replace(k, v)
         return s
             
-    def compile_script(self, input, output):
-        macros = dict()
+    def _init_pre_defines(self, predefines):
         defines = dict()
+        for d in predefines:
+            k, v = map(lambda x: x.strip(), d.split("=", 1))
+            if k == "" or v == "":
+                continue
+            if k in defines:
+                warning("overwrite pre-define %s to value %s" % (k, v))
+            defines[k] = v
+        return defines
+            
+    def compile_script(self, input, output, predefines):
+        macros = dict()
         context = list()
         current_macro = None
+        defines = self._init_pre_defines(predefines)
         with open(input) as fp:
             for lineno, line in enumerate(fp.readlines(), 1):
                 s = line.strip()
@@ -215,8 +227,9 @@ class App(object):
     def run(self):
         src = self.opts.file
         dst = self.opts.out
+        predefines = self.opts.defines
 
-        self.compile_script(src, dst)
+        self.compile_script(src, dst, predefines)
 
 if __name__ == "__main__":
     App().run()
