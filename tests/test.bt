@@ -1,0 +1,17 @@
+%define ID 0x12345
+%macro hello($s, $id)
+    printf("[%X] Hello, %s!\n", $id, $s);
+    $hello = 10;
+%end 
+
+tracepoint:syscalls:sys_enter_clone {
+    $s = "world";
+    $id = ID;
+    %call hello($s, $id);
+
+    printf("return hello: %d\n", $hello);
+
+    $s = "foo";
+    %call hello($s, $id)
+
+}
