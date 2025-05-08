@@ -123,7 +123,7 @@ class App(object):
     RE_MACRO_START = re.compile(r"^\s*%macro\s+([_a-zA-Z][_a-zA-Z0-9]*)\s*\(([\s\$_A-Za-z0-9,]*)\)$")
     RE_MACRO_END = re.compile(r"^\s*%end$")
     RE_MACRO_CALL = re.compile(r"^(\s+)%call\s+([_a-zA-Z][_a-zA-Z0-9]*)\s*\(([\s\$_a-zA-Z0-9,]*)\)\s*;?$")
-    RE_MACRO_DEFINE = re.compile(r"^\s*%define\s+([_a-zA-Z][_A-Za-z0-9]*)\s+(\w+)\s*$")
+    RE_MACRO_DEFINE = re.compile(r"^\s*%define\s+([_a-zA-Z][_A-Za-z0-9]*)\s+(.+)$")
 
     def __init__(self):
         self.opts = CommandLineParser().run()
