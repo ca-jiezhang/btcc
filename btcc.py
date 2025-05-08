@@ -54,6 +54,7 @@ class CommandLineParser(object):
                        help="output file(default: %s)" % self.DEFAULT_OUTPUT_FILE)
         p.add_argument("-f", "--file", help="source extended bt script to compile")
         p.add_argument("-v", "--verbose", action="store_true", help="show macro expanding info in comment")
+        p.add_argument("-r", "--reuse", action="store_true", help="reuse duplicated var in macro function expanded")
         p.add_argument("defines", nargs='*', help="pre-define const value")
         self.parser = p
 
@@ -64,10 +65,11 @@ class CommandLineParser(object):
         return opts
 
 class Macro(object):
-    def __init__(self, name, params, verbose):
+    def __init__(self, name, params, verbose, reuse):
         self.name = name
         self.params = params
         self.verbose = verbose
+        self.reuse = reuse
         self.lines = list()
         self.expand_id = 0
 
@@ -75,7 +77,10 @@ class Macro(object):
         self.lines.append(line)
 
     def _prefix(self):
-        return "__m%d_" % self.expand_id
+        if self.reuse:
+            return "__m_"
+        else:
+            return "__m%d_" % self.expand_id
 
     def expand(self, args, call_line, lineno, indent):
         ctx = list()
@@ -165,7 +170,7 @@ class App(object):
             defines[k] = v
         return defines
             
-    def compile_script(self, input, output, predefines, verbose):
+    def compile_script(self, input, output, predefines, verbose, reuse):
         macros = dict()
         context = list()
         current_macro = None
@@ -180,7 +185,7 @@ class App(object):
                         die("define nested macro (%s) in macro (%s) at line: %d" % (name, current_macro.name, lineno))
 
                     params = self.parse_params(sp, lineno)
-                    current_macro = Macro(name, params, verbose)
+                    current_macro = Macro(name, params, verbose, reuse)
                     continue
 
                 m = self.RE_MACRO_END.match(s)
@@ -241,9 +246,10 @@ class App(object):
         src = self.opts.file
         dst = self.opts.out
         predefines = self.opts.defines
+        reuse = self.opts.reuse
         verbose = self.opts.verbose
 
-        self.compile_script(src, dst, predefines, verbose)
+        self.compile_script(src, dst, predefines, verbose, reuse)
 
 if __name__ == "__main__":
     App().run()
