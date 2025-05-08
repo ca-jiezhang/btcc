@@ -53,6 +53,7 @@ class CommandLineParser(object):
                        default=self.DEFAULT_OUTPUT_FILE, 
                        help="output file(default: %s)" % self.DEFAULT_OUTPUT_FILE)
         p.add_argument("-f", "--file", help="source extended bt script to compile")
+        p.add_argument("-v", "--verbose", action="store_true", help="show macro expanding info in comment")
         p.add_argument("defines", nargs='*', help="pre-define const value")
         self.parser = p
 
@@ -63,9 +64,10 @@ class CommandLineParser(object):
         return opts
 
 class Macro(object):
-    def __init__(self, name, params):
+    def __init__(self, name, params, verbose):
         self.name = name
         self.params = params
+        self.verbose = verbose
         self.lines = list()
         self.expand_id = 0
 
@@ -75,7 +77,7 @@ class Macro(object):
     def _prefix(self):
         return "__m%d_" % self.expand_id
 
-    def expand(self, args, call_line, lineno):
+    def expand(self, args, call_line, lineno, indent):
         ctx = list()
         if len(self.params) != len(args):
             die("macro expand arguments mismatched at line: %d" % lineno)
@@ -83,9 +85,11 @@ class Macro(object):
         var_prefix = self._prefix()
 
         # pass arguments
-        ctx.append("\n// BEGIN: %s\n" % call_line)
+        if self.verbose:
+            ctx.append("\n%s// BEGIN: %s\n" % (indent, call_line.strip()))
+
         for (x, y) in zip(self.params, args):
-            ctx.append("\t%s%s%s = %s;\n" % (x[0], var_prefix, x[1:], y))
+            ctx.append("%s%s%s%s = %s;\n" % (indent, x[0], var_prefix, x[1:], y))
 
         # expand body
         for line in self.lines:
@@ -93,7 +97,9 @@ class Macro(object):
             expanded_line = self._expand_line(line, var_prefix)
             ctx.append(expanded_line)
 
-        ctx.append("// END: %s\n" % call_line)
+        if self.verbose:
+            ctx.append("%s// END: %s\n" % (indent, call_line.strip()))
+
         self.expand_id += 1
 
         return "".join(ctx)
@@ -114,10 +120,10 @@ class Macro(object):
         return "".join(l)
 
 class App(object):
-    RE_MACRO_START = re.compile(r"^%macro\s+([_a-zA-Z][_a-zA-Z0-9]*)\s*\(([\s\$_A-Za-z0-9,]*)\)$")
-    RE_MACRO_END = re.compile(r"^%end$")
-    RE_MACRO_CALL = re.compile(r"^%call\s+([_a-zA-Z][_a-zA-Z0-9]*)\s*\(([\s\$_a-zA-Z0-9,]*)\)\s*;?$")
-    RE_MACRO_DEFINE = re.compile(r"^%define\s+([_a-zA-Z][_A-Za-z0-9]*)\s+(\w+)\s*$")
+    RE_MACRO_START = re.compile(r"^\s*%macro\s+([_a-zA-Z][_a-zA-Z0-9]*)\s*\(([\s\$_A-Za-z0-9,]*)\)$")
+    RE_MACRO_END = re.compile(r"^\s*%end$")
+    RE_MACRO_CALL = re.compile(r"^(\s+)%call\s+([_a-zA-Z][_a-zA-Z0-9]*)\s*\(([\s\$_a-zA-Z0-9,]*)\)\s*;?$")
+    RE_MACRO_DEFINE = re.compile(r"^\s*%define\s+([_a-zA-Z][_A-Za-z0-9]*)\s+(\w+)\s*$")
 
     def __init__(self):
         self.opts = CommandLineParser().run()
@@ -159,14 +165,14 @@ class App(object):
             defines[k] = v
         return defines
             
-    def compile_script(self, input, output, predefines):
+    def compile_script(self, input, output, predefines, verbose):
         macros = dict()
         context = list()
         current_macro = None
         defines = self._init_pre_defines(predefines)
         with open(input) as fp:
             for lineno, line in enumerate(fp.readlines(), 1):
-                s = line.strip()
+                s = line.rstrip()
                 m = self.RE_MACRO_START.match(s)
                 if m:
                     name, sp = m.group(1), m.group(2)
@@ -174,7 +180,7 @@ class App(object):
                         die("define nested macro (%s) in macro (%s) at line: %d" % (name, current_macro.name, lineno))
 
                     params = self.parse_params(sp, lineno)
-                    current_macro = Macro(name, params)
+                    current_macro = Macro(name, params, verbose)
                     continue
 
                 m = self.RE_MACRO_END.match(s)
@@ -192,16 +198,21 @@ class App(object):
 
                 m = self.RE_MACRO_CALL.match(s)
                 if m:
-                    name, sp = m.group(1), m.group(2)
+                    indent, name, sp = m.group(1), m.group(2), m.group(3)
                     args = self.parse_params(sp, lineno)
-                    if current_macro is not None:
-                        die("it is forbidden to use macro call in macro definition at line: %d" % lineno)
+
+                    if current_macro is not None and current_macro.name == name:
+                        die("forbidden to call function macro (%s) recursively at line: %d" % (name, lineno))
 
                     expand_macro = macros.get(name, None)
                     if expand_macro is None:
                         die("call an unknown macro (%s) at line: %d" % (name, lineno))
 
-                    context.append(expand_macro.expand(args, s, lineno))
+                    new_line = expand_macro.expand(args, s, lineno, indent)
+                    if current_macro is None:
+                        context.append(new_line)
+                    else:
+                        current_macro.add(new_line)
                     continue
 
                 m = self.RE_MACRO_DEFINE.match(s)
@@ -215,7 +226,9 @@ class App(object):
                 new_line = self.expand_defines(line, defines)
 
                 if current_macro is None:
-                    context.append(new_line)
+                    # ignore empty line
+                    if len(new_line.strip()) != 0:
+                        context.append(new_line)
                 else:
                     current_macro.add(new_line)
 
@@ -228,8 +241,9 @@ class App(object):
         src = self.opts.file
         dst = self.opts.out
         predefines = self.opts.defines
+        verbose = self.opts.verbose
 
-        self.compile_script(src, dst, predefines)
+        self.compile_script(src, dst, predefines, verbose)
 
 if __name__ == "__main__":
     App().run()
